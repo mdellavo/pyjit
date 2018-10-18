@@ -31,13 +31,13 @@ def dump_ast(node):
 
 def compile(src):
     node = ast.parse(src)
-    dump_ast(node)
+    #dump_ast(node)
 
     emitter = IREmitter()
     compiler = Compiler(emitter)
     compiler.visit(node)
 
-    print(emitter.module)
+    return emitter.module
 
 
 Int32 = ir.IntType(32)
@@ -70,11 +70,6 @@ class IREmitter(object):
         self.locals.clear()
 
 
-class Arg(object):
-    def __init__(self, type):
-        self.type = type
-
-
 class Compiler(ast.NodeVisitor):
     def __init__(self, emitter):
         self.emitter = emitter
@@ -89,7 +84,7 @@ class Compiler(ast.NodeVisitor):
             self.visit(chunk)
 
     def visit_FunctionDef(self, node):
-        return_type = self.map_annotation(node.returns)
+        return_type = self.map_annotation(node.returns) if node.returns else Void
         arg_types = tuple(self.map_annotation(arg.annotation) for arg in node.args.args)
         func_type = ir.FunctionType(return_type, arg_types)
 
@@ -107,9 +102,9 @@ class Compiler(ast.NodeVisitor):
         return self.emitter.locals[node.id]
 
     def visit_Return(self, node):
-        rv = self.visit(node.value)
+        rv = self.visit(node.value) if node.value else None
 
-        if rv.type is not Void:
+        if rv and rv.type is not Void:
             self.emitter.builder.ret(rv)
         else:
             self.emitter.builder.ret_void()
