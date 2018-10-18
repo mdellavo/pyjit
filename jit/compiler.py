@@ -33,14 +33,19 @@ def compile(src):
     node = ast.parse(src)
     dump_ast(node)
 
-    compiler = Compiler()
+    emitter = IREmitter()
+    compiler = Compiler(emitter)
     compiler.visit(node)
 
-    print(compiler.module)
+    print(emitter.module)
 
+
+Int32 = ir.IntType(32)
+Void = ir.VoidType()
 
 TYPES = {
-    "int": ir.IntType(32)
+    "int": Int32,
+    "void": Void,
 }
 
 
@@ -50,17 +55,29 @@ class IREmitter(object):
         self.function = None
         self.block = None
         self.builder = None
+        self.locals = {}
 
     def add_module(self):
         self.module = ir.Module()
 
+    def add_block(self, name):
+        self.block = self.function.append_basic_block(name)
+        self.builder = ir.IRBuilder(self.block)
+
     def add_function(self, func_type, name):
         self.function = ir.Function(self.module, func_type, name)
+        self.add_block("entry")
+        self.locals.clear()
+
+
+class Arg(object):
+    def __init__(self, type):
+        self.type = type
 
 
 class Compiler(ast.NodeVisitor):
-    def __init__(self):
-        self.emitter = IREmitter()
+    def __init__(self, emitter):
+        self.emitter = emitter
 
     def map_annotation(self, annotation):
         return TYPES[annotation.id]
@@ -77,3 +94,22 @@ class Compiler(ast.NodeVisitor):
         func_type = ir.FunctionType(return_type, arg_types)
 
         self.emitter.add_function(func_type, node.name)
+
+        arg_names = tuple(arg.arg for arg in node.args.args)
+
+        for arg_name, func_arg, arg_type in zip(arg_names, self.emitter.function.args, arg_types):
+            self.emitter.locals[arg_name] = func_arg
+
+        for body_node in node.body:
+            self.visit(body_node)
+
+    def visit_Name(self, node):
+        return self.emitter.locals[node.id]
+
+    def visit_Return(self, node):
+        rv = self.visit(node.value)
+
+        if rv.type is not Void:
+            self.emitter.builder.ret(rv)
+        else:
+            self.emitter.builder.ret_void()
