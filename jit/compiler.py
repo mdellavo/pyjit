@@ -29,10 +29,7 @@ def dump_ast(node):
     pprint.pprint(ast2tree(node))
 
 
-def compile(src):
-    node = ast.parse(src)
-    #dump_ast(node)
-
+def compile(node):
     emitter = IREmitter()
     compiler = Compiler(emitter)
     compiler.visit(node)
@@ -97,6 +94,9 @@ class Compiler(ast.NodeVisitor):
 
         for body_node in node.body:
             self.visit(body_node)
+
+    def visit_Num(self, node):
+        return ir.Constant(Int32, node.n)
 
     def visit_Name(self, node):
         return self.emitter.locals[node.id]
