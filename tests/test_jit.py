@@ -3,7 +3,7 @@ import ast
 from jit import compiler
 
 NOOP = """
-def noop():
+def noop() -> None:
     return 
 """
 NOOP_IR = """

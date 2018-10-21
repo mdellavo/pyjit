@@ -30,67 +30,97 @@ def dump_ast(node):
 
 
 def compile(node):
-    emitter = IREmitter()
-    compiler = Compiler(emitter)
-    compiler.visit(node)
-
-    return emitter.module
+    compiler = Compiler()
+    module = compiler.visit(node)
+    return module.module
 
 
 Int32 = ir.IntType(32)
 Void = ir.VoidType()
+Bool = ir.IntType(8)
 
 TYPES = {
     "int": Int32,
     "void": Void,
 }
 
+# Desugared representation that maps to LLVM IR
 
-class IREmitter(object):
+
+class Module(object):
+    def __init__(self):
+        self.module = ir.Module()
+        self.functions = []
+
+    def add_function(self, func_type, name):
+        ir_func = ir.Function(self.module, func_type, name)
+        func = Function(ir_func)
+        self.functions.append(func)
+        return func
+
+
+class Function(object):
+    def __init__(self, func):
+        self.func = func
+        self.blocks = []
+        self.scope = {}
+
+    def add_local(self, name, ref):
+        self.scope[name] = ref
+
+    def add_block(self, name=""):
+        ir_block = self.func.append_basic_block(name)
+        block = Block(ir_block)
+        self.blocks.append(block)
+        return block
+
+
+class Block(object):
+    def __init__(self, block):
+        self.block = block
+        self.builder = ir.IRBuilder(self.block)
+
+
+class Compiler(ast.NodeVisitor):
     def __init__(self):
         self.module = None
         self.function = None
         self.block = None
-        self.builder = None
-        self.locals = {}
-
-    def add_module(self):
-        self.module = ir.Module()
-
-    def add_block(self, name):
-        self.block = self.function.append_basic_block(name)
-        self.builder = ir.IRBuilder(self.block)
-
-    def add_function(self, func_type, name):
-        self.function = ir.Function(self.module, func_type, name)
-        self.add_block("entry")
-        self.locals.clear()
-
-
-class Compiler(ast.NodeVisitor):
-    def __init__(self, emitter):
-        self.emitter = emitter
 
     def map_annotation(self, annotation):
-        return TYPES[annotation.id]
+        if isinstance(annotation, ast.NameConstant):
+            if annotation.value is None:
+                return Void
+            elif isinstance(annotation.value, bool):
+                return Bool
+
+        if isinstance(annotation, ast.Name):
+            return TYPES[annotation.id]
+
+        raise ValueError("unhandled annotation type: " + annotation)
 
     def visit_Module(self, node):
-        self.emitter.add_module()
+        self.module = Module()
 
         for chunk in node.body:
             self.visit(chunk)
+
+        return self.module
 
     def visit_FunctionDef(self, node):
         return_type = self.map_annotation(node.returns) if node.returns else Void
         arg_types = tuple(self.map_annotation(arg.annotation) for arg in node.args.args)
         func_type = ir.FunctionType(return_type, arg_types)
+        func_name = node.name
 
-        self.emitter.add_function(func_type, node.name)
+        self.function = self.module.add_function(func_type, func_name)
 
         arg_names = tuple(arg.arg for arg in node.args.args)
 
-        for arg_name, func_arg, arg_type in zip(arg_names, self.emitter.function.args, arg_types):
-            self.emitter.locals[arg_name] = func_arg
+        for arg_name, func_arg, arg_type in zip(arg_names, self.function.func.args, arg_types):
+            self.function.add_local(arg_name, func_arg)
+
+        self.block = self.function.add_block("entry")
 
         for body_node in node.body:
             self.visit(body_node)
@@ -99,12 +129,15 @@ class Compiler(ast.NodeVisitor):
         return ir.Constant(Int32, node.n)
 
     def visit_Name(self, node):
-        return self.emitter.locals[node.id]
+        return self.function.scope[node.id]
 
     def visit_Return(self, node):
         rv = self.visit(node.value) if node.value else None
 
         if rv and rv.type is not Void:
-            self.emitter.builder.ret(rv)
+            self.block.builder.ret(rv)
         else:
-            self.emitter.builder.ret_void()
+            self.block.builder.ret_void()
+
+    def visit_If(self, node):
+        pass
